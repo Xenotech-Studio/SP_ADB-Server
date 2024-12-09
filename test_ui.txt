@@ -1,0 +1,44 @@
+import websockets
+import asyncio
+
+async def test_websockets():
+    uri = "ws://127.0.0.1:9200/ws"
+    try:
+        async with websockets.connect(uri) as websocket:
+            test_message = "Hello, Websocket Server!"
+            await websocket.send(test_message)
+            print(f"sent:{test_message}")
+
+            response = await websocket.recv()
+            print(f"received:{response}")
+        
+    except Exception as e:
+        print("Error:", e)
+
+
+# await test_websockets()
+
+async def test_websocket_recv():
+    uri = "ws://127.0.0.1:9200/ws/recv"
+    try:
+        async with websockets.connect(uri) as websocket:
+            print("Connected to WebSocket server")
+
+            # Continuously listen for messages from the server
+            while True:
+                try:
+                    response = await websocket.recv()
+                    print(f"Received: {response}")
+
+                    if response == "disconnect":
+                        print("Server disconnection request")
+                        await websocket.close()
+                        print("Connection closed")
+                        break
+                except Exception as e:
+                    print("Error receiving message:", e)
+                    break
+    except Exception as e:
+        print("Error:", e)
+
+# await test_websocket_recv()

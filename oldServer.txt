@@ -1,0 +1,102 @@
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import asyncio
+import socket
+import json 
+
+app = FastAPI()
+
+# UDP Configuration for Dynamic Control Center
+DYNAMIC_CENTER_IP = "192.168.1.76"
+DYNAMIC_CENTER_PORT_SEND = 33002
+DYNAMIC_CENTER_PORT_RECV = 33001
+AUDIO_CONTROL_PORT_SEND = 33003
+
+
+def udp_send(message: str, target_ip: str, target_port: int):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.sendto(message.encode('ascii'), (target_ip, target_port))
+    sock.close()
+
+def udp_send_json(data: dict, target_ip: str, target_port: int):
+    """Send a JSON-encoded UDP message."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    json_message = json.dumps(data)  # Convert dictionary to JSON string
+    sock.sendto(json_message.encode('ascii'), (target_ip, target_port))
+    sock.close()
+
+async def udp_recv(websocket: WebSocket, listen_port: int):
+    """Receive data from the Dynamic Control Center via UDP and forward it to the WebSocket client."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("0.0.0.0", listen_port))  # Bind to all interfaces on the given port
+    sock.setblocking(False)  # Make the socket non-blocking
+
+    print(f"Listening for UDP messages on port {listen_port}...")
+
+    while True:
+        try:
+            # Receive UDP data
+            data, addr = sock.recvfrom(1024)  # Buffer size: 1024 bytes
+            message = data.decode("ascii")
+            print(f"Received from {addr}: {message}")
+
+            # Forward the received message to the WebSocket client
+            await websocket.send_text(message)
+        except BlockingIOError:
+            # No data received, wait briefly
+            await asyncio.sleep(0.1)
+
+@app.websocket("/ws/send")
+async def websocket_send(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_text()
+            print(f"Receive data: {data}")
+            # Send command to the Dynamic Control Center (via UDP)
+            udp_send(data, DYNAMIC_CENTER_IP, DYNAMIC_CENTER_PORT_SEND)
+            print(f"Sent to Dynamic Control Center: {data}")
+
+            # Acknowledge UI
+            await websocket.send_text(f"Command '{data}' sent to Dynamic Control Center!")
+    except WebSocketDisconnect:
+        print("UI disconnected")
+
+@app.websocket("/ws/recv")
+async def websocket_recv(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        await udp_recv(websocket, DYNAMIC_CENTER_PORT_RECV)
+    except WebSocketDisconnect:
+        print("UI disconnected from recv endpoint")
+
+@app.websocket("/ws/audio")
+async def websocket_audio(websocket: WebSocket):
+    """WebSocket endpoint to send audio commands."""
+    await websocket.accept()
+    try:
+        while True:
+            # Receive JSON data from the WebSocket client
+            data = await websocket.receive_text()
+            print(f"Received audio data: {data}")
+
+            try:
+                # Parse the data as JSON
+                audio_command = json.loads(data)
+
+                # Validate the JSON structure
+                if "Source" not in audio_command or "Command" not in audio_command:
+                    await websocket.send_text("Error: Missing 'Source' or 'Command' in the payload")
+                    continue
+
+                # Send the audio command to the Audio Control Center
+                udp_send_json(audio_command, DYNAMIC_CENTER_IP, AUDIO_CONTROL_PORT_SEND)
+                print(f"Sent to Audio Control Center: {audio_command}")
+
+                # Acknowledge the WebSocket client
+                await websocket.send_text(f"Audio command sent: {audio_command}")
+            except json.JSONDecodeError:
+                await websocket.send_text("Error: Invalid JSON format")
+    except WebSocketDisconnect:
+        print("Audio WebSocket client disconnected")
+
+

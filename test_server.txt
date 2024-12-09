@@ -1,0 +1,23 @@
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import asyncio
+
+app = FastAPI()
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    while True:
+        data = await websocket.receive_text()
+        await websocket.send_text(f"Message text was: {data}")
+
+@app.websocket("/ws/recv")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            await asyncio.sleep(5)
+            await websocket.send_text("Hello from the server!")
+            await asyncio.sleep(5)
+            await websocket.send_text("disconnect")  # Simulate server disconnect request
+    except:
+        print("Client disconnected")
